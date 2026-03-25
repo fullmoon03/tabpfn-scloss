@@ -49,6 +49,7 @@ Thumbs.db
 
 # Project/local runtime artifacts
 .cache/
+*.pt
 *.ckpt
 *.ckpt.lock
 *.h5
