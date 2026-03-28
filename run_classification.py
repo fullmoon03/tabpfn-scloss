@@ -580,20 +580,34 @@ def run_experiment_synthetic(
         f"{trained_metrics['ece_mean'] - baseline_metrics['ece_mean']:+.4f}"
     )
 
+    def _format_metric_curve(
+        steps: list[int],
+        values: list[float],
+        metric_name: str,
+    ) -> Optional[str]:
+        if len(steps) == 0 or len(values) == 0:
+            return None
+        by_step = {int(step): float(val) for step, val in zip(steps, values)}
+        first_step = 0 if 0 in by_step else min(by_step)
+        mid_target = 50 if 50 in by_step else steps[len(steps) // 2]
+        last_target = 100 if 100 in by_step else max(by_step)
+        return (
+            f"  {metric_name} curve (0/50/100): "
+            f"{by_step[first_step]:.4f} → {by_step[mid_target]:.4f} → {by_step[last_target]:.4f}"
+        )
+
     print("\n── Training Summary ──")
     print(f"  Total time: {train_time:.1f}s")
-    if len(train_state.losses) > 0:
-        print(f"  Final loss: {train_state.losses[-1]:.4f}")
+    emd_curve = _format_metric_curve(train_state.emd_steps, train_state.emd_values, "EMD")
+    nll_curve = _format_metric_curve(train_state.emd_steps, train_state.met_nll_values, "NLL")
+    ece_curve = _format_metric_curve(train_state.emd_steps, train_state.met_ece_values, "ECE")
+    for curve_line in (emd_curve, nll_curve, ece_curve):
+        if curve_line is not None:
+            print(curve_line)
+    if train_state.best_nll_step is not None and train_state.best_nll_value is not None:
         print(
-            f"  Loss curve (first/mid/last): "
-            f"{train_state.losses[0]:.4f} → "
-            f"{train_state.losses[len(train_state.losses)//2]:.4f} → "
-            f"{train_state.losses[-1]:.4f}"
-        )
-    if train_state.best_emd_step is not None and train_state.best_emd_value is not None:
-        print(
-            f"  Best EMD checkpoint: step={train_state.best_emd_step}, "
-            f"emd_mean={train_state.best_emd_value:.6f}"
+            f"  Best NLL checkpoint: step={train_state.best_nll_step}, "
+            f"nll={train_state.best_nll_value:.6f}"
         )
 
     print("\n── Model Export ──")
@@ -607,11 +621,11 @@ def run_experiment_synthetic(
             suffix=model_ts,
             adapter_state=final_adapter_state,
         )
-        print("  Best-EMD export: enabled")
+        print("  Best-checkpoint export: enabled")
         print(f"  Saved LoRA adapter: {adapter_path}")
         print(f"  Saved merged model state_dict: {merged_path}")
     else:
-        print("  Best-EMD export: disabled")
+        print("  Best-checkpoint export: disabled")
     if len(saved_step_exports) > 0:
         print("  Step exports:")
         for step_i, adapter_path, merged_path in saved_step_exports:

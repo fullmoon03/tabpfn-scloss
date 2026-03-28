@@ -119,8 +119,11 @@ class TrainState:
     emd_values: list[float] = field(default_factory=list)
     emd_stds: list[float] = field(default_factory=list)
     emd_coverage: list[int] = field(default_factory=list)
-    best_emd_step: Optional[int] = None
-    best_emd_value: Optional[float] = None
+    met_acc_values: list[float] = field(default_factory=list)
+    met_nll_values: list[float] = field(default_factory=list)
+    met_ece_values: list[float] = field(default_factory=list)
+    best_nll_step: Optional[int] = None
+    best_nll_value: Optional[float] = None
     # LoRA adapter snapshot (filled in train_and_merge before merge)
     lora_adapter_state: Optional[dict] = None
 
@@ -544,8 +547,8 @@ def train_synthetic(
 
     state = TrainState()
     train_model.train()
-    best_emd_value = float("inf")
-    best_emd_step: Optional[int] = None
+    best_nll_value = float("inf")
+    best_nll_step: Optional[int] = None
     best_lora_snapshot: Optional[dict[str, dict[str, torch.Tensor]]] = None
 
     if config.enable_emd:
@@ -587,18 +590,23 @@ def train_synthetic(
         state.emd_values.append(init_emd)
         state.emd_stds.append(init_std)
         state.emd_coverage.append(init_cov)
-        if np.isfinite(init_emd):
-            best_emd_value = float(init_emd)
-            best_emd_step = 0
-            best_lora_snapshot = _snapshot_lora_adapters(train_model)
         print(
             f"  [EMD {0:4d}] mean={init_emd:.6f} (std={init_std:.6f}, cov={init_cov}/{emd_pairs_total}) "
             f"(before optimization)"
         )
         if config.task_type == "classification":
+            state.met_acc_values.append(init_acc)
+            state.met_nll_values.append(init_nll)
+            state.met_ece_values.append(init_ece)
+            if np.isfinite(init_nll):
+                best_nll_value = float(init_nll)
+                best_nll_step = 0
+                best_lora_snapshot = _snapshot_lora_adapters(train_model)
             print(
                 f"  [MET {0:4d}] acc={init_acc:.4f}, nll={init_nll:.4f}, ece={init_ece:.4f}"
             )
+        elif np.isfinite(init_emd):
+            best_lora_snapshot = _snapshot_lora_adapters(train_model)
 
     # Task sampling without replacement:
     # consume a random permutation of task indices, then reshuffle when exhausted.
@@ -818,29 +826,37 @@ def train_synthetic(
             state.emd_values.append(emd_mean)
             state.emd_stds.append(emd_std)
             state.emd_coverage.append(emd_cov)
-            if np.isfinite(emd_mean) and float(emd_mean) < best_emd_value:
-                best_emd_value = float(emd_mean)
-                best_emd_step = step + 1
-                best_lora_snapshot = _snapshot_lora_adapters(train_model)
             print(
                 f"  [EMD {step+1:4d}] mean={emd_mean:.6f} (std={emd_std:.6f}, cov={emd_cov}/{emd_pairs_total})"
             )
             if config.task_type == "classification":
+                state.met_acc_values.append(met_acc)
+                state.met_nll_values.append(met_nll)
+                state.met_ece_values.append(met_ece)
+                if np.isfinite(met_nll) and float(met_nll) < best_nll_value:
+                    best_nll_value = float(met_nll)
+                    best_nll_step = step + 1
+                    best_lora_snapshot = _snapshot_lora_adapters(train_model)
                 print(
                     f"  [MET {step+1:4d}] acc={met_acc:.4f}, nll={met_nll:.4f}, ece={met_ece:.4f}"
                 )
+            elif np.isfinite(emd_mean) and best_lora_snapshot is None:
+                best_lora_snapshot = _snapshot_lora_adapters(train_model)
 
         if step_callback is not None:
             step_callback(step + 1, pred_rule_train, pred_rule_sampling)
 
     if config.enable_emd and best_lora_snapshot is not None:
         _load_lora_adapters(train_model, best_lora_snapshot)
-        state.best_emd_step = best_emd_step
-        state.best_emd_value = best_emd_value
-        print(
-            f"  Restored best EMD checkpoint: step={best_emd_step}, "
-            f"emd_mean={best_emd_value:.6f}"
-        )
+        if config.task_type == "classification":
+            state.best_nll_step = best_nll_step
+            state.best_nll_value = best_nll_value
+            print(
+                f"  Restored best NLL checkpoint: step={best_nll_step}, "
+                f"nll={best_nll_value:.6f}"
+            )
+        else:
+            print("  Restored best checkpoint snapshot.")
 
     print(f"\n── Training complete ({sum(state.elapsed):.1f}s total) ──")
     return pred_rule_train, state
