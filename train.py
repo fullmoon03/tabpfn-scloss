@@ -142,6 +142,38 @@ def _sample_indices_without_replacement(
     return perm[:size].astype(int)
 
 
+def _sample_unique_k_pairs(
+    *,
+    key: PRNGKeyArray,
+    sample_size: int,
+    k1_lo: int,
+    k1_hi: int,
+    k2_lo: int,
+    k2_hi: int,
+) -> tuple[tuple[int, int], ...]:
+    """Sample unique (k1, k2) pairs without exact duplicate pairs."""
+    n_k1 = int(k1_hi - k1_lo + 1)
+    n_k2 = int(k2_hi - k2_lo + 1)
+    n_total_pairs = int(n_k1 * n_k2)
+    if sample_size > n_total_pairs:
+        raise ValueError(
+            f"Cannot sample {sample_size} unique (k1, k2) pairs from only "
+            f"{n_total_pairs} possible combinations."
+        )
+    flat_idx = _sample_indices_without_replacement(
+        key=key,
+        n_total=n_total_pairs,
+        sample_size=sample_size,
+    )
+    pairs = []
+    for idx in flat_idx.tolist():
+        idx = int(idx)
+        k1 = k1_lo + (idx // n_k2)
+        k2 = k2_lo + (idx % n_k2)
+        pairs.append((int(k1), int(k2)))
+    return tuple(pairs)
+
+
 def _snapshot_lora_adapters(model: torch.nn.Module) -> dict[str, dict[str, torch.Tensor]]:
     """Snapshot only LoRA adapter tensors to CPU."""
     snapshot: dict[str, dict[str, torch.Tensor]] = {}
@@ -426,6 +458,12 @@ def train_synthetic(
             f"sc_k2_range must be <= continuation_depth={config.continuation_depth}, "
             f"got {config.sc_k2_range}"
         )
+    n_possible_sc_pairs = int((sc_k1_hi - sc_k1_lo + 1) * (sc_k2_hi - sc_k2_lo + 1))
+    if int(config.sc_num_pairs_per_query) > n_possible_sc_pairs:
+        raise ValueError(
+            "sc_num_pairs_per_query exceeds the number of unique (k1, k2) pairs: "
+            f"{config.sc_num_pairs_per_query} > {n_possible_sc_pairs}"
+        )
     sc_k1_values = tuple(range(sc_k1_lo, sc_k1_hi + 1))
     sc_k2_values = tuple(range(sc_k2_lo, sc_k2_hi + 1))
     sc_prefix_depths = tuple(int(v) for v in config.sc_prefix_depths)
@@ -691,26 +729,14 @@ def train_synthetic(
             for sc_prefix_depth in sc_prefix_depths:
                 conts = conts_by_prefix[int(sc_prefix_depth)]
                 for q_val in q_episode:
-                    key, k_pair_k1 = jax.random.split(key)
-                    key, k_pair_k2 = jax.random.split(key)
-                    sampled_k1 = np.asarray(
-                        jax.random.randint(
-                            k_pair_k1,
-                            shape=(int(config.sc_num_pairs_per_query),),
-                            minval=sc_k1_lo,
-                            maxval=sc_k1_hi + 1,
-                        )
-                    ).astype(int)
-                    sampled_k2 = np.asarray(
-                        jax.random.randint(
-                            k_pair_k2,
-                            shape=(int(config.sc_num_pairs_per_query),),
-                            minval=sc_k2_lo,
-                            maxval=sc_k2_hi + 1,
-                        )
-                    ).astype(int)
-                    sampled_pairs = tuple(
-                        (int(k1), int(k2)) for k1, k2 in zip(sampled_k1.tolist(), sampled_k2.tolist())
+                    key, k_pairs = jax.random.split(key)
+                    sampled_pairs = _sample_unique_k_pairs(
+                        key=k_pairs,
+                        sample_size=int(config.sc_num_pairs_per_query),
+                        k1_lo=sc_k1_lo,
+                        k1_hi=sc_k1_hi,
+                        k2_lo=sc_k2_lo,
+                        k2_hi=sc_k2_hi,
                     )
                     ks_for_query = tuple(
                         sorted({int(k) for pair in sampled_pairs for k in pair})
