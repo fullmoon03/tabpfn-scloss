@@ -8,11 +8,9 @@ Design:
   - multiple independently sampled query/context/rollout splits per task
   - context size is fixed
   - query-sampling variation induces EMD variation
-  - baseline vs 1-step SC-tuned model overlay
+  - baseline vs externally provided tuned model overlay
 
 Notes:
-  - SC tuning uses the same pairwise SC loss structure as run_classification.py,
-    but runs only a few optimizer steps with resampled tuning splits.
   - EMD semantics match the current run_classification.py convention:
       base sampling + belief-model evaluation
 """
@@ -23,7 +21,8 @@ Notes:
 # python inspect/run_synthetic_emd_nll_ece_relation.py --setup-group simple_linear_ablations --no-include-tuned
 # python inspect/run_synthetic_emd_nll_ece_relation.py --setup-group scm_variants --no-include-tuned
 # python inspect/run_synthetic_emd_nll_ece_relation.py --setup-group nonlinear_link_setups --no-include-tuned
-# python inspect/run_synthetic_emd_nll_ece_relation.py --setup-group nonlinear_link_setups --n-splits 50 --tuning-steps 5
+# python inspect/run_synthetic_emd_nll_ece_relation.py --setup-group nonlinear_link_setups --n-splits 50
+# python inspect/run_synthetic_emd_nll_ece_relation.py --setup-group scm_variants --no-include-baseline --tuned-merged-state /path/to/merged_model_state.pt
 
 
 from __future__ import annotations
@@ -54,10 +53,8 @@ from eval import (
     compute_basic_metrics,
 )
 from generate_synthetic import MixtureConfig, generate_mixture_task, make_mixture_config
-from lora import LoRAConfig, get_lora_params, get_tabpfn_model, inject_lora, merge_lora
-from loss import sc_loss
 from predictive_rule import ClassifierPredRule
-from train import _build_prefix_continuation_map, _compute_query_marginals_for_ks
+from run_synthetic_uncertainty_scaling import load_locked_state
 
 
 STANDARD_PRIOR_ORDER = ("gbdt", "scm", "smooth_mlp", "sparse_linear")
@@ -362,25 +359,6 @@ def _build_eval_splits(
     return splits
 
 
-def _build_tuning_split(
-    *,
-    x_task: np.ndarray,
-    y_task: np.ndarray,
-    seed: int,
-    context_size: int,
-    query_pool_size: int,
-) -> dict[str, np.ndarray]:
-    rng = np.random.default_rng(int(seed))
-    return _sample_valid_split(
-        x_task=x_task,
-        y_task=y_task,
-        rng=rng,
-        context_size=context_size,
-        query_pool_size=query_pool_size,
-        require_all_classes_in_context=True,
-    )
-
-
 def _evaluate_anchor_metrics(
     *,
     model_state_dict: dict[str, torch.Tensor] | None,
@@ -453,168 +431,6 @@ def _evaluate_anchor_emd(
         anchor_rollout_pools=[np.asarray(x_rollout_pool, dtype=np.float32)],
     )
     return float(emd_mean)
-
-
-def _run_single_step_sc_tuning(
-    *,
-    x_task: np.ndarray,
-    y_task: np.ndarray,
-    categorical_x: list[bool],
-    device: str,
-    n_estimators: int,
-    lr: float,
-    weight_decay: float,
-    lora_r: int,
-    lora_alpha: float,
-    n_continuations: int,
-    continuation_depth: int,
-    queries_per_episode: int,
-    num_pairs_per_query: int,
-    k1_range: tuple[int, int],
-    k2_range: tuple[int, int],
-    prefix_depths: tuple[int, ...],
-    seed: int,
-    tuning_steps: int,
-    context_size: int,
-    query_pool_size: int,
-) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
-    split_rng = np.random.default_rng(int(seed))
-    init_split = _sample_valid_split(
-        x_task=x_task,
-        y_task=y_task,
-        rng=split_rng,
-        context_size=int(context_size),
-        query_pool_size=int(query_pool_size),
-        require_all_classes_in_context=True,
-    )
-    x_ctx_init = np.asarray(x_task[init_split["idx_context"]], dtype=np.float32)
-    y_ctx_init_global = np.asarray(y_task[init_split["idx_context"]]).astype(int)
-    _, y_ctx_init_local = _relabel_to_contiguous(y_ctx_init_global)
-    pred_rule_sampling = ClassifierPredRule(categorical_x, n_estimators=n_estimators)
-    pred_rule_train = ClassifierPredRule(categorical_x, n_estimators=n_estimators)
-    pred_rule_sampling.fit(x_ctx_init, y_ctx_init_local)
-    pred_rule_train.fit(x_ctx_init, y_ctx_init_local)
-
-    train_model = get_tabpfn_model(pred_rule_train)
-    lora_config = LoRAConfig(
-        r=int(lora_r),
-        alpha=float(lora_alpha),
-        target_layers=None,
-        include_decoder=False,
-    )
-    lora_modules = inject_lora(train_model, lora_config)
-    optimizer = torch.optim.AdamW(
-        get_lora_params(lora_modules),
-        lr=float(lr),
-        weight_decay=float(weight_decay),
-    )
-
-    sc_k1_lo, sc_k1_hi = int(k1_range[0]), int(k1_range[1])
-    sc_k2_lo, sc_k2_hi = int(k2_range[0]), int(k2_range[1])
-    key = jax.random.PRNGKey(int(seed))
-    device_obj = torch.device(device)
-    train_model.to(device_obj)
-    train_model.train()
-    pair_losses: list[float] = []
-    tuned_conf_vals: list[float] = []
-    for _ in range(int(tuning_steps)):
-        step_split = _sample_valid_split(
-            x_task=x_task,
-            y_task=y_task,
-            rng=split_rng,
-            context_size=int(context_size),
-            query_pool_size=int(query_pool_size),
-            require_all_classes_in_context=True,
-        )
-        x_ctx = np.asarray(x_task[step_split["idx_context"]], dtype=np.float32)
-        y_ctx_global = np.asarray(y_task[step_split["idx_context"]]).astype(int)
-        x_qpool = np.asarray(x_task[step_split["idx_query"]], dtype=np.float32)
-        x_roll_pool = np.asarray(x_task[step_split["idx_rollout"]], dtype=np.float32)
-        _, y_ctx_local = _relabel_to_contiguous(y_ctx_global)
-        pred_rule_sampling.fit(x_ctx, y_ctx_local)
-        pred_rule_train.fit(x_ctx, y_ctx_local)
-
-        optimizer.zero_grad(set_to_none=True)
-
-        key, k_q = jax.random.split(key)
-        if len(x_qpool) >= int(queries_per_episode):
-            q_idx = np.asarray(
-                jax.random.choice(k_q, len(x_qpool), shape=(int(queries_per_episode),), replace=False)
-            ).astype(int)
-        else:
-            q_idx = np.asarray(
-                jax.random.choice(k_q, len(x_qpool), shape=(int(queries_per_episode),), replace=True)
-            ).astype(int)
-        q_episode = x_qpool[q_idx]
-
-        conts_by_prefix, key = _build_prefix_continuation_map(
-            key=key,
-            pred_rule_sampling=pred_rule_sampling,
-            x_context=x_ctx,
-            y_context=y_ctx_local,
-            prefix_depths=tuple(int(v) for v in prefix_depths),
-            continuation_depth=int(continuation_depth),
-            n_continuations=int(n_continuations),
-            fixed_rollout_keys=None,
-            x_sampling_pool=x_roll_pool,
-            x_sample_without_replacement=True,
-        )
-
-        for prefix_depth in prefix_depths:
-            conts = conts_by_prefix[int(prefix_depth)]
-            for q_val in q_episode:
-                key, k_pair_k1 = jax.random.split(key)
-                key, k_pair_k2 = jax.random.split(key)
-                sampled_k1 = np.asarray(
-                    jax.random.randint(
-                        k_pair_k1,
-                        shape=(int(num_pairs_per_query),),
-                        minval=sc_k1_lo,
-                        maxval=sc_k1_hi + 1,
-                    )
-                ).astype(int)
-                sampled_k2 = np.asarray(
-                    jax.random.randint(
-                        k_pair_k2,
-                        shape=(int(num_pairs_per_query),),
-                        minval=sc_k2_lo,
-                        maxval=sc_k2_hi + 1,
-                    )
-                ).astype(int)
-                sampled_pairs = tuple(
-                    (int(k1), int(k2))
-                    for k1, k2 in zip(sampled_k1.tolist(), sampled_k2.tolist())
-                )
-                ks_for_query = tuple(sorted({int(k) for pair in sampled_pairs for k in pair}))
-                no_grad_keys_for_query = (
-                    {int(k2) for _, k2 in sampled_pairs}
-                    .difference({int(k1) for k1, _ in sampled_pairs})
-                )
-                p_hat = _compute_query_marginals_for_ks(
-                    pred_rule_train=pred_rule_train,
-                    continuations=conts,
-                    ks=ks_for_query,
-                    x_query=np.atleast_2d(q_val),
-                    no_grad_keys=no_grad_keys_for_query,
-                )
-                l_sc = sc_loss(p_by_k=p_hat, sampled_pairs=sampled_pairs)
-                micro_loss = l_sc / (float(len(prefix_depths)) * float(len(q_episode)))
-                micro_loss.backward()
-                pair_losses.append(float(l_sc.detach().cpu().item()))
-                conf_k = min(int(k1) for k1, _ in sampled_pairs)
-                p_conf = p_hat[conf_k] / p_hat[conf_k].sum().clamp_min(1e-8)
-                tuned_conf_vals.append(float(p_conf.max().detach().cpu().item()))
-
-        optimizer.step()
-    merged_count = merge_lora(train_model)
-    if merged_count <= 0:
-        raise RuntimeError("Expected merged LoRA modules after single-step tuning.")
-    merged_state = _clone_state_dict_cpu(train_model.state_dict())
-    return merged_state, {
-        "sc_loss_mean": float(np.mean(pair_losses)) if pair_losses else float("nan"),
-        "conf_tuned_mean": float(np.mean(tuned_conf_vals)) if tuned_conf_vals else float("nan"),
-        "tuning_steps": int(tuning_steps),
-    }
 
 
 def _plot_scatter(
@@ -710,7 +526,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--priors", type=str, default="gbdt,scm,smooth_mlp,sparse_linear")
     parser.add_argument("--task-seed-base", type=int, default=42)
     parser.add_argument("--n-splits", type=int, default=200)
-    parser.add_argument("--train-seed-offset", type=int, default=10_000)
     parser.add_argument("--split-seed-offset", type=int, default=1_000)
     parser.add_argument("--context-size", type=int, default=100)
     parser.add_argument("--query-pool-size", type=int, default=20)
@@ -740,17 +555,14 @@ def parse_args() -> argparse.Namespace:
         "--include-tuned",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Whether to run SC tuning and compute tuned points.",
+        help="Whether to evaluate an externally provided tuned merged model.",
     )
-    parser.add_argument("--tuning-lr", type=float, default=1e-3)
-    parser.add_argument("--tuning-steps", type=int, default=5)
-    parser.add_argument("--tuning-weight-decay", type=float, default=0.01)
-    parser.add_argument("--tuning-queries-per-episode", type=int, default=3)
-    parser.add_argument("--tuning-num-pairs-per-query", type=int, default=4)
-    parser.add_argument("--tuning-k1-range", type=str, default="1,5")
-    parser.add_argument("--tuning-k2-range", type=str, default="6,10")
-    parser.add_argument("--lora-r", type=int, default=8)
-    parser.add_argument("--lora-alpha", type=float, default=16.0)
+    parser.add_argument(
+        "--tuned-merged-state",
+        type=str,
+        default="",
+        help="Merged model state_dict path to use as the tuned model.",
+    )
     parser.add_argument("--save-dir", type=str, default="synthetic_emd_relation")
     return parser.parse_args()
 
@@ -765,17 +577,15 @@ def main() -> None:
     setup_names = tuple(name for name, _ in setup_specs)
     prefix_depths = (0,)
     k_values = _parse_int_tuple(args.k_values)
-    tuning_k1_range = _parse_int_tuple(args.tuning_k1_range)
-    tuning_k2_range = _parse_int_tuple(args.tuning_k2_range)
-    if len(tuning_k1_range) != 2 or len(tuning_k2_range) != 2:
-        raise ValueError("tuning-k1-range and tuning-k2-range must have two integers.")
+    tuned_path = str(args.tuned_merged_state).strip()
+    if args.include_tuned and tuned_path == "":
+        raise ValueError("--include-tuned requires --tuned-merged-state.")
 
     out_dir = Path(args.save_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _now_tag()
 
     results_rows: list[dict[str, Any]] = []
-    tuning_rows: list[dict[str, Any]] = []
 
     for setup_idx, (setup_name, cfg) in enumerate(setup_specs):
         task_seed = int(args.task_seed_base) + setup_idx
@@ -809,44 +619,8 @@ def main() -> None:
 
         tuned_state: dict[str, torch.Tensor] | None = None
         if args.include_tuned:
-            tuned_state, tuning_info = _run_single_step_sc_tuning(
-                x_task=x_task,
-                y_task=y_task,
-                categorical_x=categorical_x,
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                n_estimators=int(args.n_estimators),
-                lr=float(args.tuning_lr),
-                weight_decay=float(args.tuning_weight_decay),
-                lora_r=int(args.lora_r),
-                lora_alpha=float(args.lora_alpha),
-                n_continuations=int(args.n_continuations),
-                continuation_depth=int(args.continuation_depth),
-                queries_per_episode=int(args.tuning_queries_per_episode),
-                num_pairs_per_query=int(args.tuning_num_pairs_per_query),
-                k1_range=(int(tuning_k1_range[0]), int(tuning_k1_range[1])),
-                k2_range=(int(tuning_k2_range[0]), int(tuning_k2_range[1])),
-                prefix_depths=prefix_depths,
-                seed=task_seed + int(args.train_seed_offset) + 1,
-                tuning_steps=int(args.tuning_steps),
-                context_size=int(args.context_size),
-                query_pool_size=int(args.query_pool_size),
-            )
-            tuning_rows.append(
-                {
-                    "setup_name": setup_name,
-                    "prior_type": prior_type,
-                    "task_seed": task_seed,
-                    "synthetic_mode": cfg.mode_name,
-                    "sc_loss_mean": tuning_info["sc_loss_mean"],
-                    "conf_tuned_mean": tuning_info["conf_tuned_mean"],
-                    "tuning_steps": tuning_info["tuning_steps"],
-                }
-            )
-            print(
-                f"  {tuning_info['tuning_steps']}-step tuning: "
-                f"sc_loss={tuning_info['sc_loss_mean']:.4f}, "
-                f"conf={tuning_info['conf_tuned_mean']:.4f}"
-            )
+            tuned_state = load_locked_state(tuned_path)
+            print(f"  Tuned model source: external merged state ({tuned_path})")
 
         for split in eval_splits:
             split_id = int(split["query_sample_id"])
@@ -957,13 +731,10 @@ def main() -> None:
     correlation_rows = _summarize_correlations(results_rows)
     details_csv = out_dir / f"synthetic_emd_relation_details_{tag}.csv"
     corr_csv = out_dir / f"synthetic_emd_relation_correlations_{tag}.csv"
-    tuning_csv = out_dir / f"synthetic_emd_relation_tuning_{tag}.csv"
     plot_png = out_dir / f"synthetic_emd_relation_scatter_{tag}.png"
 
     _write_csv(details_csv, results_rows)
     _write_csv(corr_csv, correlation_rows)
-    if tuning_rows:
-        _write_csv(tuning_csv, tuning_rows)
     _plot_scatter(
         rows=results_rows,
         out_path=plot_png,
@@ -973,8 +744,6 @@ def main() -> None:
     print("\nSaved:")
     print(f"  details:      {details_csv}")
     print(f"  correlations: {corr_csv}")
-    if tuning_rows:
-        print(f"  tuning:       {tuning_csv}")
     print(f"  plot:         {plot_png}")
 
 
