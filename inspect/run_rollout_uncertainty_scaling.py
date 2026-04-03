@@ -21,7 +21,7 @@ Outputs:
 
 # Example:
 # python inspect/run_rollout_uncertainty_scaling.py --setup-group single_mode --synthetic-mode scm_mix
-# python inspect/run_rollout_uncertainty_scaling.py --setup-group nonlinear_link_setups --n-tasks-per-setup 100
+# python inspect/run_rollout_uncertainty_scaling.py --setup-group nonlinear_link_setups --n-tasks-per-setup 20
 
 from __future__ import annotations
 
