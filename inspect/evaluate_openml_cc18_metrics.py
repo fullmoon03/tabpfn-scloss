@@ -323,7 +323,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--context-size", type=int, default=100, help="Context size")
     p.add_argument("--query-size", type=int, default=50, help="Query size")
     p.add_argument("--seed", type=int, default=42, help="Base random seed")
-    p.add_argument("--n-estimators", type=int, default=2, help="TabPFN n_estimators")
+    p.add_argument("--n-estimators", type=int, default=4, help="TabPFN n_estimators")
     p.add_argument(
         "--max-datasets",
         type=int,

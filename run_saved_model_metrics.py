@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--openml-data-id", type=int, default=54)
     parser.add_argument("--test-size", type=float, default=0.25)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument(
         "--metric-context-size",
         type=int,

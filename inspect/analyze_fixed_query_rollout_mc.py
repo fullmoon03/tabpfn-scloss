@@ -39,7 +39,7 @@ def compute_fixed_query_rollout_stats(
     x_query_pool: np.ndarray,
     categorical_x: list[bool],
     pred_rule_factory: Optional[Callable[[], Any]] = None,
-    n_estimators: int = 2,
+    n_estimators: int = 4,
     base_n: int = 50,
     depth: int = 30,
     n_paths: int = 8,
@@ -109,7 +109,7 @@ def run_fixed_query_rollout_analysis(
     categorical_x: list[bool],
     class_names: Optional[Sequence[Any]] = None,
     pred_rule_factory: Optional[Callable[[], Any]] = None,
-    n_estimators: int = 2,
+    n_estimators: int = 4,
     base_n: int = 50,
     depth: int = 30,
     n_paths: int = 8,
@@ -246,7 +246,7 @@ def run_fixed_queries_rollout_grid_analysis(
     categorical_x: list[bool],
     class_names: Optional[Sequence[Any]] = None,
     pred_rule_factory: Optional[Callable[[], Any]] = None,
-    n_estimators: int = 2,
+    n_estimators: int = 4,
     base_n: int = 50,
     depth: int = 30,
     n_paths: int = 8,
@@ -363,7 +363,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth", type=int, default=30, help="Rollout depth N")
     parser.add_argument("--n-paths", type=int, default=8, help="Number of independent paths J")
     parser.add_argument("--query-index", type=int, default=0, help="Fixed query index in X_test")
-    parser.add_argument("--n-estimators", type=int, default=2, help="TabPFN n_estimators")
+    parser.add_argument("--n-estimators", type=int, default=4, help="TabPFN n_estimators")
     parser.add_argument("--seed", type=int, default=0, help="Global seed")
     parser.add_argument("--show", action="store_true", help="Show plots interactively")
     return parser.parse_args()

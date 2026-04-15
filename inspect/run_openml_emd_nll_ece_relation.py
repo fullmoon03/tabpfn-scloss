@@ -248,7 +248,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-repeats", type=int, default=200)
     p.add_argument("--context-size", type=int, default=100)
     p.add_argument("--query-size", type=int, default=20)
-    p.add_argument("--n-estimators", type=int, default=1)
+    p.add_argument("--n-estimators", type=int, default=4)
     p.add_argument("--ece-bins", type=int, default=5)
     p.add_argument("--k-values", type=str, default="3,5,7,9")
     p.add_argument("--continuation-depth", type=int, default=20)

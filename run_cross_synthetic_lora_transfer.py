@@ -136,7 +136,7 @@ def main() -> None:
         required=True,
         help="Path to merged model checkpoint to evaluate directly.",
     )
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument(
         "--include-base",
         action=argparse.BooleanOptionalAction,

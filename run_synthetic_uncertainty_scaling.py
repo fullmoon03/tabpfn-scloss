@@ -138,7 +138,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--replicates", type=int, default=50)
     p.add_argument("--n0-grid", type=str, default="16,32,64,128")
     p.add_argument("--include-full-train", action="store_true")
-    p.add_argument("--n-estimators", type=int, default=1)
+    p.add_argument("--n-estimators", type=int, default=4)
     p.add_argument("--tuned-merged-state", type=str, default="")
     p.add_argument("--eps", type=float, default=1e-12)
     p.add_argument("--output-dir", type=str, default="synthetic_uncertainty_scaling")

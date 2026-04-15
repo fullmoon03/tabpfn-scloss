@@ -575,7 +575,7 @@ if __name__ == "__main__":
 
     config = TrainConfig(
         task_type="classification",
-        n_estimators=1,
+        n_estimators=4,
         seed=42,
         continuation_depth=30,
         n_continuations=8,

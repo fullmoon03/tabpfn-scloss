@@ -88,7 +88,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metric-context-size", type=int, default=100)
     parser.add_argument("--metric-replicates", type=int, default=30)
     parser.add_argument("--ece-bins", type=int, default=5)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument(
         "--tuned-merged-state",
         type=str,

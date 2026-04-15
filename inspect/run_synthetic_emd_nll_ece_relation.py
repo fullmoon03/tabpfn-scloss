@@ -544,7 +544,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--k-values", type=str, default="3,5,7,9")
     parser.add_argument("--n-continuations", type=int, default=8)
     parser.add_argument("--continuation-depth", type=int, default=30)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument(
         "--include-baseline",
         action=argparse.BooleanOptionalAction,

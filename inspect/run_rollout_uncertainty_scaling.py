@@ -292,7 +292,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--query-count", type=int, default=24)
     parser.add_argument("--n-continuations", type=int, default=24)
     parser.add_argument("--rollout-depth", type=int, default=30)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument("--save-dir", type=str, default="rollout_uncertainty_scaling")
     return parser.parse_args()
 

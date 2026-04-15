@@ -274,7 +274,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-paths", type=int, default=8, help="Number of independent paths")
     parser.add_argument("--depth", type=int, default=30, help="Rollout depth")
     parser.add_argument("--base-n", type=int, default=100, help="Base context size")
-    parser.add_argument("--n-estimators", type=int, default=2, help="TabPFN n_estimators")
+    parser.add_argument("--n-estimators", type=int, default=4, help="TabPFN n_estimators")
 
     parser.add_argument(
         "--model-path",

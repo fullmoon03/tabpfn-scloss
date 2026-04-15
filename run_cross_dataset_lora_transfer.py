@@ -391,7 +391,7 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-size", type=float, default=0.25)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument("--alphas", type=str, default="0.5,1.0")
     parser.add_argument("--out-dir", type=str, default="cross_dataset_transfer")
     parser.add_argument("--save-csv", action="store_true")

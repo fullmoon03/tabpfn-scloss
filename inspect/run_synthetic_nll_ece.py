@@ -160,7 +160,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split-seed-offset", type=int, default=1_000)
     parser.add_argument("--context-size", type=int, default=100)
     parser.add_argument("--query-pool-size", type=int, default=20)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument(
         "--include-baseline",
         action=argparse.BooleanOptionalAction,

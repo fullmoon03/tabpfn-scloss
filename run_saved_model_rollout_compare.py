@@ -44,7 +44,7 @@ class RolloutCompareConfig:
 
     # Common rollout options
     seed: int = 42
-    n_estimators: int = 1
+    n_estimators: int = 4
     rollout_base_n: int = 100
     rollout_depth: int = 20
     rollout_n_paths: int = 8
@@ -424,7 +424,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--synthetic-query-pool-size", type=int, default=20)
 
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--n-estimators", type=int, default=4)
     parser.add_argument("--rollout-base-n", type=int, default=100)
     parser.add_argument("--rollout-depth", type=int, default=20)
     parser.add_argument("--rollout-n-paths", type=int, default=8)

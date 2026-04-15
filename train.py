@@ -51,7 +51,7 @@ class TrainConfig:
     task_type: str = "classification"  # "classification" or "regression"
 
     # Rollout
-    n_estimators: int = 1        # TabPFN ensemble size
+    n_estimators: int = 4        # TabPFN ensemble size
     continuation_depth: int = 15   # T: continuation rollout depth
     n_continuations: int = 8       # B: MC continuations per prefix
     k_max: int = 5                 # Kmax: horizon pair upper bound
